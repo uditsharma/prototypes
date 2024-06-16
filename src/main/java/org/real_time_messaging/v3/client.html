@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Slack-like Messaging App</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #channels, #messages {
+            margin-top: 20px;
+        }
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+<h1>Slack-like Messaging App</h1>
+
+<div id="username-section">
+    <h2>Enter Username</h2>
+    <input type="text" id="username" placeholder="Username">
+    <button onclick="saveUsername()">Save Username</button>
+</div>
+
+<div id="main-section" class="hidden">
+    <h2>Welcome, <span id="display-username"></span></h2>
+    <div id="create-channel">
+        <h2>Create Channel</h2>
+        <input type="text" id="channel-name" placeholder="Channel Name">
+        <button onclick="createChannel()">Create Channel</button>
+    </div>
+
+    <div id="list-channels">
+        <h2>Channels</h2>
+        <button onclick="listUserChannels()">My Channels</button>
+        <ul id="user-channels"></ul>
+
+        <button onclick="listAllChannels()">All Channels</button>
+        <ul id="all-channels"></ul>
+    </div>
+
+    <div id="channel-messages" class="hidden">
+        <h2>Channel Messages</h2>
+        <div id="messages"></div>
+        <input type="text" id="message" placeholder="Message">
+        <button onclick="sendMessage()">Send Message</button>
+    </div>
+</div>
+
+<script>
+    const baseUrl = 'http://localhost:8080/channels';
+    let websocket;
+    let currentChannel = null;
+
+    function saveUsername() {
+        const username = document.getElementById('username').value;
+        if (username) {
+            localStorage.setItem('username', username);
+            document.getElementById('username-section').classList.add('hidden');
+            document.getElementById('main-section').classList.remove('hidden');
+            document.getElementById('display-username').textContent = username;
+            listUserChannels();
+        } else {
+            alert('Please enter a username.');
+        }
+    }
+
+    function getUsername() {
+        return localStorage.getItem('username');
+    }
+
+    function createChannel() {
+        const channelName = document.getElementById('channel-name').value;
+        fetch(baseUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: channelName })
+        })
+        .then(response => response.text())
+        .then(data => {
+            alert(data);
+            listUserChannels();
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    function listUserChannels() {
+        const username = getUsername();
+        fetch(`${baseUrl}/users/${username}/channels`)
+        .then(response => response.json())
+        .then(data => {
+            const userChannelsList = document.getElementById('user-channels');
+            userChannelsList.innerHTML = '';
+            data.forEach(channel => {
+                const li = document.createElement('li');
+                li.textContent = channel;
+                li.onclick = () => openChannel(channel);
+                userChannelsList.appendChild(li);
+            });
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    function listAllChannels() {
+        fetch(baseUrl)
+        .then(response => response.json())
+        .then(data => {
+            const allChannelsList = document.getElementById('all-channels');
+            allChannelsList.innerHTML = '';
+            data.forEach(channel => {
+                const li = document.createElement('li');
+                li.textContent = channel;
+                li.onclick = () => joinChannel(channel);
+                allChannelsList.appendChild(li);
+            });
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    function joinChannel(channel) {
+        const username = getUsername();
+        fetch(`${baseUrl}/${channel}/membership`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user: username })
+        })
+        .then(response => response.text())
+        .then(data => {
+            alert(data);
+            listUserChannels();
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    function openChannel(channel) {
+        currentChannel = channel;
+        document.getElementById('channel-messages').classList.remove('hidden');
+        setupWebSocket();
+        fetch(`${baseUrl}/${channel}/messages`)
+        .then(response => response.json())
+        .then(data => {
+            const messagesDiv = document.getElementById('messages');
+            messagesDiv.innerHTML = '';
+            data.forEach(message => {
+                const p = document.createElement('p');
+                p.textContent = `${message.user}: ${message.message}`;
+                messagesDiv.appendChild(p);
+            });
+        })
+        .catch(error => console.error('Error:', error));
+    }
+
+    function setupWebSocket() {
+        const username = getUsername();
+        const wsUrl = `ws://localhost:8887/websocket?user=${username}`;
+        websocket = new WebSocket(wsUrl);
+
+        websocket.onopen = () => {
+            console.log('WebSocket connection opened');
+        };
+
+        websocket.onmessage = (event) => {
+            const messageDiv = document.getElementById('messages');
+            const messageData = JSON.parse(event.data);
+            const p = document.createElement('p');
+            p.textContent = `${messageData.user}: ${messageData.message}`;
+            messageDiv.appendChild(p);
+        };
+
+        websocket.onclose = () => {
+            console.log('WebSocket connection closed');
+        };
+
+        websocket.onerror = (error) => {
+            console.error('WebSocket error:', error);
+        };
+    }
+
+    function sendMessage() {
+        const message = document.getElementById('message').value;
+        const username = getUsername();
+        if (websocket && websocket.readyState === WebSocket.OPEN) {
+            const messageData = { user: username, channel: currentChannel, message: message };
+            websocket.send(JSON.stringify(messageData));
+            document.getElementById('message').value = '';
+        } else {
+            alert('WebSocket connection is not open.');
+        }
+    }
+
+    window.onload = function() {
+        const username = getUsername();
+        if (username) {
+            document.getElementById('username-section').classList.add('hidden');
+            document.getElementById('main-section').classList.remove('hidden');
+            document.getElementById('display-username').textContent = username;
+            listUserChannels();
+        }
+    }
+</script>
+</body>
+</html>
